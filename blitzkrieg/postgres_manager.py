@@ -6,7 +6,7 @@ from blitzkrieg.db.models.base import Base
 from blitzkrieg.db.models.environment_variable import EnvironmentVariable
 from blitzkrieg.db.models.workspace import Workspace
 from blitzkrieg.pgadmin_manager import PgAdminManager
-from blitzkrieg.utils.run_command import run_command
+from blitzkrieg.utils.run_command import run_command, run_poetry_command
 import time
 from blitzkrieg.ui_management.console_instance import console
 import sqlalchemy
@@ -48,7 +48,7 @@ class WorkspaceDbManager:
         self.pgadmin_manager = pgadmin_manager
 
     def set_connection(self):
-        engine = sqlalchemy.create_engine(f"postgresql+psycopg2://alexfigueroa-db-user:pw@localhost:{self.pgadmin_manager.postgres_port}/alexfigueroa")
+        engine = sqlalchemy.create_engine(f"postgresql+psycopg2://{self.workspace_name}-db-user:pw@localhost:{self.pgadmin_manager.postgres_port}/{self.workspace_name}")
         self.connection = engine.connect()
         Base.metadata.create_all(engine)
         self.Session = sessionmaker(bind=engine)
@@ -72,20 +72,20 @@ class WorkspaceDbManager:
         session.add(workspace)
         session.commit()
 
+        pw = blitz_env_manager.get_global_env_var('PASSWORD')
+
         # Save environment variables
         env_vars = {
             "POSTGRES_USER": self.db_user,
-            "POSTGRES_PASSWORD": self.blitz_env_manager.set_global_env_var('PASSWORD', 'Enter your password: '),
+            "POSTGRES_PASSWORD": pw,
             "POSTGRES_DB": self.workspace_name,
             "POSTGRES_HOST": self.container_name,
             "POSTGRES_PORT": self.db_port,
             "PGADMIN_DEFAULT_EMAIL": self.blitz_env_manager.set_global_env_var('EMAIL', 'Enter your email: '),
-            "PGADMIN_DEFAULT_PASSWORD": self.blitz_env_manager.set_global_env_var('PASSWORD', 'Enter your password: '),
+            "PGADMIN_DEFAULT_PASSWORD": pw,
             "PGADMIN_PORT": self.pgadmin_manager.pgadmin_port,
             "WORKSPACE_NAME": self.workspace_name,
             "WORKSPACE_DIRECTORY": self.workspace_directory_manager.workspace_path,
-            "ALEMBIC_INI_PATH": self.alembic_manager.alembic_ini_path,
-            "ALEMBIC_ENV_PATH": self.alembic_manager.alembic_env_path,
             "SQLALCHEMY_MODELS_PATH": self.alembic_manager.sqlalchemy_models_path,
             "SQLALCHEMY_URI": self.get_sqlalchemy_uri(),
             "POSTGRES_SERVER_CONFIG_HOST": self.pgadmin_manager.postgres_server_config_host,
@@ -118,15 +118,15 @@ class WorkspaceDbManager:
             if connection:
                 connection.close()
 
-    def teardown(self):
-        return self.docker_manager.remove_container(self.container_name)
+    def teardown(self, app):
+        return self.docker_manager.remove_container(app, self.container_name)
 
     def run_postgres_container(self):
         try:
             env_vars = {
                 "POSTGRES_DB": self.workspace_name,
                 "POSTGRES_USER": self.db_user,
-                "POSTGRES_PASSWORD": self.blitz_env_manager.set_global_env_var('PASSWORD', 'Enter your password: '),
+                "POSTGRES_PASSWORD": self.blitz_env_manager.get_global_env_var('PASSWORD'),
                 "POSTGRES_INITDB_ARGS": "--auth-local=md5"
             }
             self.docker_manager.run_container(
@@ -147,7 +147,7 @@ class WorkspaceDbManager:
         try:
             time.sleep(1.5)
             connection = self.get_connection_details()
-            self.console_interface.spinner.text = (f"Trying to connect to SQLAlchemy engine with password ({self.blitz_env_manager.set_global_env_var('PASSWORD', 'Enter your password: ')}) at {self.get_sqlalchemy_uri()}")
+            self.console_interface.spinner.text = (f"Trying to connect to SQLAlchemy engine with password ({self.blitz_env_manager.get_global_env_var('PASSWORD')}) at {self.get_sqlalchemy_uri()}")
             engine = sqlalchemy.create_engine(self.get_sqlalchemy_uri())
             connection = engine.connect()
             connection.close()
@@ -159,13 +159,13 @@ class WorkspaceDbManager:
         return {
             "database": self.workspace_name,
             "user": self.db_user,
-            "password": self.blitz_env_manager.set_global_env_var('PASSWORD', 'Enter your password: '),
+            "password": self.blitz_env_manager.get_global_env_var('PASSWORD'),
             "host": self.container_name,
             "port": self.db_port
         }
 
     def get_sqlalchemy_uri(self):
-        db_uri = f"postgresql+psycopg2://{self.db_user}:{self.blitz_env_manager.set_global_env_var('PASSWORD', 'Enter your password: ')}@{self.workspace_name}-postgres:{self.db_port}/{self.workspace_name}"
+        db_uri = f"postgresql+psycopg2://{self.db_user}:{self.blitz_env_manager.get_global_env_var('PASSWORD')}@{self.workspace_name}-postgres:{self.db_port}/{self.workspace_name}"
         return db_uri
 
     def setup_schema(self):
@@ -174,5 +174,5 @@ class WorkspaceDbManager:
 
     def run_alembic_upgrade(self):
         command = ['alembic', 'upgrade', 'head']
-        result = run_command(command)
+        result = run_poetry_command(command, self.workspace_directory_manager.workspace_path)
         return result

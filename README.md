@@ -35,6 +35,7 @@ Blitzkrieg simplifies software development by automating CLI project setups and 
 6. **Project Scaffolding**
    - Creation of basic project structure
    - Setup of SQLAlchemy models
+
 ## Getting Started
 
 ### Prerequisites
@@ -54,27 +55,33 @@ pip install blitzkrieg
 1. **Creating a Blitzkrieg Workspace**
 To initialize Blitzkrieg on your local:
 ```bash
-blitz create workspace <workspace_name>
+blitz workspace create <workspace_name>
 ```
 
-This sets up your workspace database and workspace pgadmin instance, as well as your workspace directory - so that Blitzkrieg can manage your projects and databases. The ```workspace_name``` can be an organization name, first and last name, etc.
+This sets up your workspace database and workspace pgadmin instance, as well as your workspace directory - so that Blitzkrieg can manage your projects and databases. The ```workspace_name``` can be an organization name, first and last name, etc. This will also set the CURRENT_ACTIVE_WORKSPACE to the ```workspace_name``` in the global ```.blitz.env``` file, so that Blitzkrieg can know what workspace you are currently working in.
 
-2. **cd Into New Workspace**
+   - If you need to delete the workspace:
 ```bash
-cd <workspace_name>
+blitz workspace delete
 ```
+   This will prompt the user with a menu to select which workspace to delete. Selecting a workspace name will teardown the workspace pgadmin and postgres containers, and the workspace directory. It does not remove anything from Github.
 
-3. **Create a New CLI Tool**
+2. **Create a New CLI Tool**
 ```bash
-blitz create project <project_name>
+blitz project create
 ```
+This will prompt you with a list of project template types to choose. Select one, then it will prompt you for the project name. If you enter a valid project name, then it will do the following:
+- scaffold the basic dir structure
+- create a corresponding github repo
+- push the project to the github repo
+- save project details in workspace database for analysis and data storage
 
-4. **cd Into New Project**
+**If you need to delete a workspace:**
 ```bash
-cd <project_name>
+blitz project delete
 ```
 
-5. **Release Project**
+3. **Release Project**
 ```bash
 blitz release <project_name>
 ```
@@ -84,14 +91,6 @@ blitz release <project_name>
 blitz delete <workspace_name>
 ```
 
-#### Synchronizing Issues and Documentation
-To ensure all your issues are up-to-date across blitzkrieg, your local host directory, and github issues:
-
-```bash
-blitz sync
-```
-
-This will update your project management tools and local documentation to reflect the latest changes and issues.
 
 ## Core Innovations
 

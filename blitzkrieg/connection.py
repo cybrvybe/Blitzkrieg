@@ -2,14 +2,18 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 
+from blitzkrieg.class_instances.blitz_env_manager import blitz_env_manager
 from blitzkrieg.db.models.project import Project
 
 def get_db_engine():
-    engine = create_engine('postgresql+psycopg2://alexfigueroa-db-user:pw@localhost:5432/alexfigueroa')
+    workspace_name = blitz_env_manager.get_workspace_env_var('WORKSPACE_NAME')
+    engine = create_engine(f'postgresql+psycopg2://{workspace_name}-db-user:pw@localhost:5432/{workspace_name}')
     return engine
 
 def get_docker_db_engine():
-    engine = create_engine('postgresql+psycopg2://alexfigueroa-db-user:pw@host.docker.internal:5432/alexfigueroa')
+    postgres_port = blitz_env_manager.get_workspace_env_var('POSTGRES_PORT')
+    workspace_name = blitz_env_manager.get_workspace_env_var('WORKSPACE_NAME')
+    engine = create_engine(f"postgresql+psycopg2://{workspace_name}-db-user:pw@host.docker.internal:{str(postgres_port)}/{workspace_name}")
     return engine
 
 def get_docker_db_session():

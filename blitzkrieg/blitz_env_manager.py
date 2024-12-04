@@ -1,6 +1,8 @@
 import os
 import json
 from typing import Optional
+
+import questionary
 from blitzkrieg.ui_management.console_instance import console
 
 class BlitzEnvManager:
@@ -65,19 +67,53 @@ class BlitzEnvManager:
 
         with open(file_path, 'w') as f:
             f.writelines(lines)
+            console.handle_info(f"Set {key}={value} in {file_path}")
 
     def get_global_env_var(self, key: str) -> Optional[str]:
         self.console.handle_info(f"Checking global env var at {self.global_env_file_path} for the key {key}...")
         return self._get_env_var(key, self.global_env_file_path)
 
+    def get_global_env_vars(self) -> dict:
+        if not os.path.exists(self.global_env_file_path):
+            return {}
+        with open(self.global_env_file_path, 'r') as f:
+            env_vars = {}
+            for line in f:
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    env_vars[key] = value.strip()
+            return env_vars
+
     def set_global_env_var(self, key: str, value: str):
         self._set_env_var(key, value, self.global_env_file_path)
 
+    def delete_global_env_var(self):
+        # generate the list of env vars tochoose
+        lines = []
+        if os.path.exists(self.global_env_file_path):
+            with open(self.global_env_file_path, 'r') as f:
+                lines = f.readlines()
+
+        updated = False
+        choice= questionary.select(
+            "Select the environment variable to delete:",
+            choices=[line.split('=', 1)[0] for line in lines if '=' in line]
+        ).ask()
+        lines = [line for line in lines if not line.startswith(f"{choice}=")]
+
+        with open(self.global_env_file_path, 'w') as f:
+            f.writelines(lines)
+            console.handle_info(f"Deleted {choice} from {self.global_env_file_path}")
+
     def get_workspace_env_var(self, key: str) -> Optional[str]:
-        if not self.workspace_env_file_path:
+        current_workspace = self.get_global_env_var('CURRENT_WORKSPACE')
+        current_workspace_path = self.workspace_env_file_path
+        if not self.workspace_env_file_path and not current_workspace:
             self.console.handle_error("Workspace not set. Use set_workspace() first.")
             return None
-        return self._get_env_var(key, self.workspace_env_file_path)
+        if current_workspace:
+            current_workspace_path = self.get_global_env_var('CURRENT_WORKSPACE_PATH')
+        return self._get_env_var(key, os.path.join(current_workspace_path, self.file_name))
 
     def set_workspace_env_var(self, key: str, value: str):
         if not self.workspace_env_file_path:

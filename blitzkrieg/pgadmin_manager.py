@@ -68,7 +68,10 @@ class PgAdminManager:
             self.container_name,
             "dpage/pgadmin4",
             self.network_name,
-            {"PGADMIN_DEFAULT_EMAIL": self.blitz_env_manager.set_global_env_var('EMAIL', 'Enter your email: '), "PGADMIN_DEFAULT_PASSWORD": self.blitz_env_manager.set_global_env_var('PASSWORD', 'Enter your password: ')},
+            {
+                "PGADMIN_DEFAULT_EMAIL": self.blitz_env_manager.get_global_env_var('EMAIL'),
+                "PGADMIN_DEFAULT_PASSWORD": self.blitz_env_manager.get_global_env_var('PASSWORD')
+            },
             {'80/tcp': self.pgadmin_port},
             volume_bind
         )

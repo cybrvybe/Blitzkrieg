@@ -3,7 +3,7 @@
 from sqlalchemy import UUID, Column, Integer, String, ForeignKey, Boolean, DateTime, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from blitzkrieg.project_management.db.models.Base import Base
+from blitzkrieg.db.models.base import Base
 class Issue(Base):
     __tablename__ = 'issue'
 

@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 from rich.logging import RichHandler
+from rich.traceback import Traceback
 from rich import box
 from rich.syntax import Syntax
 from termcolor import colored
@@ -17,6 +18,7 @@ import shutil
 import pyperclip
 import io
 import os
+import random
 
 # Setup structured and colored logging
 logging.basicConfig(
@@ -333,11 +335,22 @@ class ConsoleInterface:
         self._ensure_spinner_started()
         self.spinner.fail(message)
         self.logger.output_buffer.write(f"✖ {message}\n")
+
         if error_object:
-            error_details = json.dumps(error_object, default=lambda o: o.__dict__, sort_keys=True, indent=4)
-            error_syntax = Syntax(error_details, "json", theme="monokai", line_numbers=True)
+            error_details = {}
+            for key, value in error_object.__dict__.items():
+                if key == 'stderr':
+                    # Format the traceback
+                    try:
+                        tb = Traceback.from_exception(type(error_object), error_object, error_object.__traceback__)
+                        error_details[key] = tb
+                    except:
+                        error_details[key] = value  # Fallback to original stderr if formatting fails
+                else:
+                    error_details[key] = value
+
             error_panel = Panel(
-                error_syntax,
+                Syntax(json.dumps(error_details, default=str, sort_keys=True, indent=4), "json", theme="monokai", line_numbers=True),
                 title="Error Details",
                 title_align="left",
                 border_style="red",
@@ -345,16 +358,45 @@ class ConsoleInterface:
                 box=box.DOUBLE,
             )
             self.logger.console.print(error_panel)
+
+            # Print formatted traceback separately for better readability
+            if 'stderr' in error_details and isinstance(error_details['stderr'], Traceback):
+                self.logger.console.print("\nDetailed Traceback:")
+                self.logger.console.print(error_details['stderr'])
         else:
             self.logger.console.print(Panel(f"[bold red]{message}", border_style="red"))
-        self.spinner.stop()
 
+        self.spinner.stop()
     def handle_wait(self, message):
         self._ensure_spinner_started()
         self.spinner.text = message
         self.spinner.start()
         self.logger.output_buffer.write(f"... {message}\n")
         self.spinner.stop()
+
+    def display_llm_system_chat_response_display(self, response):
+        # randomize the color of the response
+        color = ['red', 'green', 'yellow', 'blue', 'magenta',
+                    'cyan', 'white', 'bright_red', 'bright_green',
+                    'bright_yellow', 'bright_blue', 'bright_magenta',
+                    'bright_cyan', 'bright_white']
+        color = color[random.randint(0, len(color) - 1)]
+
+        # format the text to be displayed in monospace
+        response = f"```\n{response}\
+                    \n```"
+
+
+
+        # create cool chat display box for llm responses
+        box = Panel(
+            Text(response, style=f"bold {color}"),
+            title="LLM Response",
+            title_align="left",
+            border_style="green",
+            expand=False
+        )
+        self.logger.console.print(box)
 
     def handle_info(self, message):
         self._ensure_spinner_started()

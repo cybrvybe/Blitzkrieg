@@ -1,0 +1,2 @@
+maturin new rust_codetextualizer
+cd rust_codetextualizer

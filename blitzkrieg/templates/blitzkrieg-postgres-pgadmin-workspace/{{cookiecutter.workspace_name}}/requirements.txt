@@ -1,3 +1,4 @@
 alembic
 sqlalchemy
 psycopg2-binary
+-e /app/blitzkrieg

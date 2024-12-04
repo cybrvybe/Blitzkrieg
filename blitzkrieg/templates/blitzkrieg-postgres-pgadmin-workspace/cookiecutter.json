@@ -1,0 +1,9 @@
+{
+    "workspace_name": "alexfigueroa",
+    "pgadmin_port": 5050,
+    "pgadmin_port_forward": 80,
+    "pgadmin_secondary_port": 443,
+    "pgadmin_secondary_port_forward": 443,
+    "postgres_port": 5432,
+    "postgres_port_forward": 5432
+}

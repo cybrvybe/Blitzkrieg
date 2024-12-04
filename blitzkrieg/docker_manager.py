@@ -7,6 +7,8 @@ from blitzkrieg.ui_management.ConsoleInterface import ConsoleInterface
 from blitzkrieg.ui_management.console_instance import console
 import time
 
+
+
 class DockerManager:
     def __init__(self):
         self.client = docker.from_env()
@@ -75,55 +77,55 @@ class DockerManager:
         self.console.handle_error(f"Timeout exceeded while waiting for container {container_name} to start.")
         return None
 
-    def remove_container(self, container_name):
+    def remove_container(self, app, container_name):
         """Remove a Docker container."""
         try:
-            self.console.spinner.text = (f"Removing container {container_name}...")
+            app.handle_info(f"Removing container {container_name}...")
             container = self.client.containers.get(container_name)
             container.remove(force=True)
-            return self.console.handle_success(f"Container [white]'{container_name}'[/white] removed successfully.")
+            app.handle_success(f"Container [white]'{container_name}'[/white] removed successfully.")
         except NotFound as e:
-            return self.console.handle_error(f"Container {container_name} not found.")
+            app.handle_error(f"Container {container_name} not found.")
         except APIError as e:
-            return self.console.handle_error(f"Failed to remove container [white]{container_name}[/white]: {str(e)}")
+            app.handle_error(f"Failed to remove container [white]{container_name}[/white]: {str(e)}")
         except Exception as e:
-            return self.console.handle_error(f"Failed to remove container [white]{container_name}[/white]: {str(e)}")
+            app.handle_error(f"Failed to remove container [white]{container_name}[/white]: {str(e)}")
 
-    def remove_volume(self, volume_name):
+    def remove_volume(self, app, volume_name):
         """Remove a Docker volume."""
         try:
-            self.console.handle_info(f"Removing volume {volume_name}...")
+            app.handle_info(f"Removing volume {volume_name}...")
             volume = self.client.volumes.get(volume_name)
             volume.remove()
             return True
         except NotFound as e:
-            self.console.handle_error(f"Volume {volume_name} not found.")
+            app.handle_error(f"Volume {volume_name} not found.")
             return False
 
-    def remove_all_volumes(self):
+    def remove_all_volumes(self, app):
         """Remove all Docker volumes."""
         try:
             for volume in self.client.volumes.list():
                 volume.remove()
             volume_names = [v.name for v in self.client.volumes.list()]
             csv_volume_names = ', '.join(volume_names)
-            return self.console.handle_success(f"The following volumes have been removed successfully: {csv_volume_names}")
+            app.handle_success(f"The following volumes have been removed successfully: {csv_volume_names}")
         except NotFound as e:
-            return self.console.handle_error(f"Volume not found.")
+            app.handle_error(f"Volume not found.")
         except APIError as e:
-            return self.console.handle_error(f"Failed to remove volume: {str(e)}")
+            app.handle_error(f"Failed to remove volume: {str(e)}")
         except Exception as e:
-            return self.console.handle_error(f"Failed to remove volume: {str(e)}")
+            app.handle_error(f"Failed to remove volume: {str(e)}")
 
-    def remove_docker_network(self, network_name):
+    def remove_docker_network(self, app, network_name):
         """Remove a Docker network."""
         try:
             network = self.client.networks.get(network_name)
             network.remove()
-            return self.console.handle_success(f"Network [white]{network_name}[/white] removed successfully.")
+            app.handle_success(f"Network [white]{network_name}[/white] removed successfully.")
         except NotFound as e:
-            return self.console.handle_error(f"Network {network_name} not found.")
+            app.handle_error(f"Network {network_name} not found.")
         except APIError as e:
-            return self.console.handle_error(f"Failed to remove network [white]{network_name}[/white] due to APIError: {str(e)}")
+            app.handle_error(f"Failed to remove network [white]{network_name}[/white] due to APIError: {str(e)}")
         except Exception as e:
-            return self.console.handle_error(f"Failed to remove network [white]{network_name}[/white]: {str(e)}")
+            app.handle_error(f"Failed to remove network [white]{network_name}[/white]: {str(e)}")

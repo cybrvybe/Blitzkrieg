@@ -24,3 +24,4 @@ settings.json
 event_types.py
 .bashrc
 .blitz.env
+workspacetester/

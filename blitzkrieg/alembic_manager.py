@@ -3,10 +3,11 @@
 import os
 import subprocess
 import shutil
-from typing import List
-from blitzkrieg.db.models.base import Base
-from blitzkrieg.db.models.issue import Issue
-from blitzkrieg.db.models.project import Project
+import time
+
+from psycopg2 import OperationalError
+from sqlalchemy import create_engine, text
+from blitzkrieg.class_instances.blitz_env_manager import blitz_env_manager
 from blitzkrieg.ui_management.ConsoleInterface import ConsoleInterface
 from blitzkrieg.file_manager import FileManager
 import sys
@@ -15,151 +16,126 @@ class AlembicManager:
     def __init__(self, db_manager, file_manager: FileManager, workspace_name: str, console: ConsoleInterface = None):
         self.workspace_name = workspace_name
         self.workspace_path = os.path.join(os.getcwd(), self.workspace_name)
-        self.db_manager = db_manager
         self.file_manager = file_manager
-        self.alembic_env_path = os.path.join(self.workspace_path, 'env.py')
-        self.alembic_ini_path = os.path.join(self.workspace_path, 'alembic.ini')
-        self.migrations_path = os.path.join(self.workspace_path, 'migrations')
         self.sqlalchemy_models_path = os.path.join(self.workspace_path, 'sqlalchemy_models')
-        self.alembic_init__template_path = os.path.join(os.getcwd(), 'blitzkrieg', 'workspace_management', 'templates', 'alembic_init.sh')
-        self.workspace_requirements_txt_template_path = os.path.join(os.getcwd(), 'blitzkrieg', 'workspace_management', 'templates', 'requirements.txt')
-        self.initial_table_models = [Base, Project, Issue]
         self.models_directory = os.path.join(os.getcwd(), 'blitzkrieg', 'db', 'models')
+        self.env_py_path = os.path.join(os.getcwd(), 'blitzkrieg', 'db', 'env.py')
         self.console = console if console else ConsoleInterface()
         self.init_paths = [
             self.workspace_path,
             os.path.join(self.workspace_path, 'sqlalchemy_models'),
         ]
-    def get_alembic_init_content(self):
-        return f"""
-[alembic]
-# path to migration scripts
-script_location = migrations
+        self.postgres_port = None
 
-# template used to generate migration file names; The default value is %%(rev)s_%%(slug)s
-# Uncomment the line below if you want the files to be prepended with date and time
-# see https://alembic.sqlalchemy.org/en/latest/tutorial.html#editing-the-ini-file
-# for all available tokens
-# file_template = %%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s
-
-# sys.path path, will be prepended to sys.path if present.
-# defaults to the current working directory.
-prepend_sys_path = .
-
-# timezone to use when rendering the date within the migration file
-# as well as the filename.
-# If specified, requires the python>=3.9 or backports.zoneinfo library.
-# Any required deps can installed by adding `alembic[tz]` to the pip requirements
-# string value is passed to ZoneInfo()
-# leave blank for localtime
-# timezone =
-
-# max length of characters to apply to the
-# "slug" field
-# truncate_slug_length = 40
-
-# set to 'true' to run the environment during
-# the 'revision' command, regardless of autogenerate
-# revision_environment = false
-
-# set to 'true' to allow .pyc and .pyo files without
-# a source .py file to be detected as revisions in the
-# versions/ directory
-# sourceless = false
-
-# version location specification; This defaults
-# to migrations/versions.  When using multiple version
-# directories, initial revisions must be specified with --version-path.
-# The path separator used here should be the separator specified by "version_path_separator" below.
-# version_locations = %(here)s/bar:%(here)s/bat:migrations/versions
-
-# version path separator; As mentioned above, this is the character used to split
-# version_locations. The default within new alembic.ini files is "os", which uses os.pathsep.
-# If this key is omitted entirely, it falls back to the legacy behavior of splitting on spaces and/or commas.
-# Valid values for version_path_separator are:
-#
-# version_path_separator = :
-# version_path_separator = ;
-# version_path_separator = space
-version_path_separator = os  # Use os.pathsep. Default configuration used for new projects.
-
-# set to 'true' to search source files recursively
-# in each "version_locations" directory
-# new in Alembic version 1.10
-# recursive_version_locations = false
-
-# the output encoding used when revision files
-# are written from script.py.mako
-# output_encoding = utf-8
-
-sqlalchemy.url = postgresql+psycopg2://$*workspace_name*$-db-user:pw@$*workspace_name*$-postgres:5432/$*workspace_name*$
-
-
-[post_write_hooks]
-# post_write_hooks defines scripts or Python functions that are run
-# on newly generated revision scripts.  See the documentation for further
-# detail and examples
-
-# format using "black" - use the console_scripts runner, against the "black" entrypoint
-# hooks = black
-# black.type = console_scripts
-# black.entrypoint = black
-# black.options = -l 79 REVISION_SCRIPT_FILENAME
-
-# lint with attempts to fix using "ruff" - use the exec runner, execute a binary
-# hooks = ruff
-# ruff.type = exec
-# ruff.executable = %(here)s/.venv/bin/ruff
-# ruff.options = --fix REVISION_SCRIPT_FILENAME
-
-# Logging configuration
-[loggers]
-keys = root,sqlalchemy,alembic
-
-[handlers]
-keys = console
-
-[formatters]
-keys = generic
-
-[logger_root]
-level = WARN
-handlers = console
-qualname =
-
-[logger_sqlalchemy]
-level = WARN
-handlers =
-qualname = sqlalchemy.engine
-
-[logger_alembic]
-level = INFO
-handlers =
-qualname = alembic
-
-[handler_console]
-class = StreamHandler
-args = (sys.stderr,)
-level = NOTSET
-formatter = generic
-
-[formatter_generic]
-format = %(levelname)-5.5s [%(name)s] %(message)s
-datefmt = %H:%M:%S
-
-"""
-    def create_alembic_ini_file(self):
+    def run_alembic_migration(self, message: str):
         try:
-            self.console.handle_wait("Creating alembic.ini file...")
-            alembic_init_content = self.get_alembic_init_content()
-            with open(self.alembic_ini_path, 'w') as f:
-                f.write(alembic_init_content)
-            # take content that has $*workspace_name*$ and replace it with the actual workspace name, same for all other vars encapsulated by those chars
-            self.file_manager.replace_text_in_file(self.alembic_ini_path, '$*workspace_name*$', self.workspace_name)
-            self.console.handle_success(f"Created alembic.ini file at [white]{self.alembic_ini_path}[/white]")
-            self.console.display_file_content(self.alembic_ini_path)
+            self._run_migration(message)
+            self._run_command(['alembic', 'upgrade', 'head'])
+            self.console.handle_success("Migration completed successfully.")
         except Exception as e:
-            return self.console.handle_error(f"Failed to create alembic.ini file: {str(e)}")
+            self.console.handle_error(f"An error occurred during migration: {str(e)}")
+            raise
+
+    def initialize_alembic(self):
+        try:
+            self._run_command(['alembic', 'init', 'migrations'])
+            self._update_env_py()
+            self.run_alembic_migration("Initial migration")
+            self.console.handle_success("Alembic initialization completed successfully")
+        except Exception as e:
+            self.console.handle_error(f"An error occurred during Alembic initialization: {str(e)}")
+            raise
+    def _run_command(self, command):
+        try:
+            # Prepend 'poetry run' to ensure the command runs inside the Poetry virtual environment
+            poetry_command = ['poetry', 'run'] + command
+
+            # Run the command in the workspace directory, ensuring it executes in the Poetry environment
+            result = subprocess.run(poetry_command, cwd=self.workspace_path, check=True,
+                                    capture_output=True, text=True)
+
+            # Handle command output
+            self.console.handle_info(result.stdout)
+            if result.stderr:
+                self.console.handle_error(result.stderr)
+
+        except subprocess.CalledProcessError as e:
+            # Handle called process errors with detailed information
+            self.console.handle_error(f"Command failed: {e}", e)
+            self.console.handle_error(f"Command stdout:\n{e.stdout}")
+            self.console.handle_error(f"Command stderr:\n{e.stderr}")
+            raise
+
+        except Exception as e:
+            # Handle any other exceptions
+            self.console.handle_error(f"An error occurred during command execution: {str(e)}", e)
+            raise
+
+
+    def wait_for_db(self):
+        postgres_port = blitz_env_manager.get_workspace_env_var('POSTGRES_PORT')
+        max_attempts = 30
+        for attempt in range(max_attempts):
+            try:
+                engine = create_engine(f'postgresql+psycopg2://{self.workspace_name}-db-user:pw@localhost:{postgres_port}/{self.workspace_name}')
+                with engine.connect() as connection:
+                    connection.execute(text("SELECT 1"))
+                self.console.handle_info("Database is ready.")
+                return
+            except OperationalError:
+                self.console.handle_info(f"Database not ready. Attempt {attempt + 1}/{max_attempts}. Retrying in 2 seconds...")
+                time.sleep(2)
+        raise Exception("Database connection timed out")
+
+    def create_schema(self):
+        postgres_port = blitz_env_manager.get_workspace_env_var('POSTGRES_PORT')
+        with create_engine(f'postgresql+psycopg2://{self.workspace_name}-db-user:pw@localhost:{postgres_port}/{self.workspace_name}').connect() as connection:
+            connection.execute(text("CREATE SCHEMA IF NOT EXISTS project_management"))
+            connection.commit()
+        self.console.handle_info("Created 'project_management' schema.")
+
+    def _run_migration(self, message: str):
+        try:
+            env = os.environ.copy()
+            env['PYTHONPATH'] = f"{self.workspace_path}:{env.get('PYTHONPATH', '')}"
+
+            result = self._run_command(['alembic', 'revision', '--autogenerate', '-m', message], env=env)
+            self.console.handle_info(result.stdout)
+            if result.stderr:
+                self.console.handle_error(f"Alembic stderr output:\n{result.stderr}")
+
+            if result.returncode != 0:
+                raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+        except subprocess.CalledProcessError as e:
+            self.console.handle_error(f"Migration failed: {e}", e)
+            self.console.handle_error(f"Alembic stdout:\n{e.stdout}")
+            self.console.handle_error(f"Alembic stderr:\n{e.stderr}")
+            self._debug_alembic_env()
+            raise
+
+    def _debug_alembic_env(self):
+        self.console.handle_info("Debugging Alembic environment...")
+        env_py_path = os.path.join(self.workspace_path, 'migrations', 'env.py')
+        with open(env_py_path, 'r') as f:
+            self.console.handle_info(f"Contents of env.py:\n{f.read()}")
+
+        self.console.handle_info(f"Current working directory: {os.getcwd()}")
+        self.console.handle_info(f"Workspace path: {self.workspace_path}")
+        self.console.handle_info(f"Python path: {sys.path}")
+
+    def _update_env_py(self):
+        postgres_port = blitz_env_manager.get_workspace_env_var('POSTGRES_PORT')
+        env_py_path = os.path.join(self.workspace_path, 'migrations', 'env.py')
+        with open(env_py_path, 'w') as f:
+            shutil.copy(self.env_py_path, env_py_path)
+            self.file_manager.replace_text_in_file(
+                env_py_path,
+                'blitzkrieg.db.models',
+                'alexfigueroa.sqlalchemy_models'
+            )
+
+
+        self.console.handle_info(f"Updated {env_py_path}")
 
 
     def create_init_files(self):
@@ -184,163 +160,93 @@ datefmt = %H:%M:%S
         except Exception as e:
             return self.console.handle_error(f"Failed to create sqlalchemy_models directory: {str(e)}")
 
-    def copy_alembic_init_script(self):
+
+    def copy_sqlalchemy_models(self, migration_epoch_key: str):
+        # create type/enum for migration_epoch_key
+
+        migration_epoch_mapper = {
+            'initial_migration_epoch': {
+                'models_to_exclude': [
+                    'readme.py',
+                    'conversation.py',
+                    'chat_message.py'
+                ]
+            },
+            'readme_migration_epoch': {
+                'models_to_include': [
+                    'readme.py',
+                    'conversation.py'
+                ],
+                'models_to_exclude': [
+                    'chat_message.py'
+                ]
+            },
+            'chat_message_migration_epoch': {
+                'models_to_include': [
+                    'chat_message.py'
+                ]
+            }
+        }
+
+        models_to_exclude = migration_epoch_mapper[migration_epoch_key].get('models_to_exclude', [])
+        models_to_include = migration_epoch_mapper[migration_epoch_key].get('models_to_include', [])
+        model_filenames = os.listdir(self.models_directory)
+        # if key is initial_migration_epoch, exclude readme.py but copy over all other models
         try:
-            if os.path.exists(self.alembic_init__template_path):
-                shutil.copy(self.alembic_init__template_path, self.workspace_path)
-                self.file_manager.chmod_permissions(os.path.join(self.workspace_path, 'alembic_init.sh'), 0o755)
-                self.replace_variable_placeholders_in_alembic_init_script()
-                return self.console.handle_success(f"Copied alembic_init.py to {self.workspace_path}")
-            else:
-                return self.console.handle_error(f"alembic_init.sh not found at {self.alembic_init__template_path}")
-        except Exception as e:
-            return self.console.handle_error(f"Failed to copy alembic_init.py: {str(e)}")
+                if self.models_directory and model_filenames:
+                    for filename in os.listdir(self.models_directory):
+                        if filename in models_to_exclude or filename == '__pycache__':
+                            continue
+                        elif filename == '__init__.py':
+                            full_file_path = os.path.join(self.models_directory, filename)
+                            shutil.copy(full_file_path, self.sqlalchemy_models_path)
+                            self.file_manager.replace_text_in_file(
+                                os.path.join(self.sqlalchemy_models_path, filename),
+                                '.base',
+                                f"alexfigueroa.sqlalchemy_models.base"
+                            )
+                            self.file_manager.replace_text_in_file(
+                                os.path.join(self.sqlalchemy_models_path, filename),
+                                'blitzkrieg.db.models',
+                                f"alexfigueroa.sqlalchemy_models"
+                            )
+                            self.file_manager.replace_text_in_file(
+                                os.path.join(self.sqlalchemy_models_path, filename),
+                                'alexfigueroa.sqlalchemy_modelsalexfigueroa.sqlalchemy_models.',
+                                'alexfigueroa.sqlalchemy_models.'
+                            )
+                        else:
+                            full_file_path = os.path.join(self.models_directory, filename)
+                            shutil.copy(full_file_path, self.sqlalchemy_models_path)
+                            self.file_manager.replace_text_in_file(
+                                os.path.join(self.sqlalchemy_models_path, filename),
+                                'blitzkrieg.db.models',
+                                f"alexfigueroa.sqlalchemy_models"
+                            )
+                            self.file_manager.replace_text_in_file(
+                                os.path.join(self.sqlalchemy_models_path, filename),
+                                'blitzkrieg.project_management.db.models',
+                                f"alexfigueroa.sqlalchemy_models"
+                            )
+                            self.file_manager.replace_text_in_file(
+                                os.path.join(self.sqlalchemy_models_path, filename),
+                                'sqlalchemy_models.Base',
+                                'alexfigueroa.sqlalchemy_models.base'
+                            )
+                            self.file_manager.replace_text_in_file(
+                                os.path.join(self.sqlalchemy_models_path, filename),
+                                'alexfigueroa.alexfigueroa',
+                                'alexfigueroa'
+                            )
+                            self.file_manager.replace_text_in_file(
+                                os.path.join(self.sqlalchemy_models_path, filename),
+                                'alexfigueroa.sqlalchemy_modelsalexfigueroa.sqlalchemy_models.',
+                                'alexfigueroa.sqlalchemy_models.'
+                            )
 
-    def replace_variable_placeholders_in_alembic_init_script(self):
-        workspace_alembic_init_script_path = os.path.join(self.workspace_path, 'alembic_init.sh')
-
-        try:
-            self.file_manager.replace_text_in_file(
-                workspace_alembic_init_script_path,
-                '$*workspace_name*$',
-                self.workspace_name
-            )
-            self.console.handle_info(f"Replacing postgres_port variable placeholder in alembic_init.sh and setting its value to {self.db_manager.db_port}")
-            self.file_manager.replace_text_in_file(
-                workspace_alembic_init_script_path,
-                '$*postgres_port*$',
-                str(self.db_manager.db_port)
-            )
-            return self.console.handle_success(f"Replaced variable placeholders in alembic_init.sh")
-        except Exception as e:
-            return self.console.handle_error(f"Failed to replace variable placeholders in alembic_init.sh: {str(e)}")
-
-    def copy_sqlalchemy_models(self):
-        try:
-            if self.models_directory and os.path.exists(self.models_directory):
-                for filename in os.listdir(self.models_directory):
-                    full_file_path = os.path.join(self.models_directory, filename)
-                    if os.path.isfile(full_file_path) and filename.endswith('.py'):
-                        shutil.copy(full_file_path, self.sqlalchemy_models_path)
-                        self.file_manager.replace_text_in_file(
-                            os.path.join(self.sqlalchemy_models_path, filename),
-                            'blitzkrieg.db.models',
-                            f"sqlalchemy_models"
-                        )
-                        self.file_manager.replace_text_in_file(
-                            os.path.join(self.sqlalchemy_models_path, filename),
-                            'blitzkrieg.project_management.db.models',
-                            f"sqlalchemy_models"
-                        )
-                        self.file_manager.replace_text_in_file(
-                            os.path.join(self.sqlalchemy_models_path, filename),
-                            'sqlalchemy_models.Base',
-                            'sqlalchemy_models.base'
-                        )
-
-                return self.console.handle_success(f"Copied SQLAlchemy models from [white]{self.models_directory}[/white] to [white]{self.sqlalchemy_models_path}[/white].")
+                    self.create_init_files()
+                    # set workspace_dir to PYTHONPATH
+                    sys.path.append(self.workspace_path)
+                    return self.console.handle_success(f"Copied SQLAlchemy models from [white]{self.models_directory}[/white] to [white]{self.sqlalchemy_models_path}[/white].")
         except Exception as e:
             return self.console.handle_error(f"Failed to copy SQLAlchemy models: {str(e)}")
-
-    def copy_requirements_txt(self):
-        self.copy_file_to_container(
-            self.workspace_requirements_txt_template_path,
-            os.path.join(self.workspace_path, 'requirements.txt')
-        )
-    def copy_file_to_container(self, file_path: str, container_path: str):
-        try:
-            if os.path.exists(file_path):
-                shutil.copy(file_path, container_path)
-                return self.console.handle_success(f"Copied {file_path} to {container_path}")
-            else:
-                return self.console.handle_error(f"File not found: {file_path}")
-        except Exception as e:
-            return self.console.handle_error(f"Failed to copy file to container: {str(e)}")
-
-
-    def update_sqlalchemy_uri(self):
-        try:
-            with open(self.alembic_ini_path, 'r') as f:
-                lines = f.readlines()
-            with open(self.alembic_ini_path, 'w') as f:
-                for line in lines:
-                    if line.startswith('sqlalchemy.url'):
-                        f.write(f'sqlalchemy.url = {self.db_manager.get_sqlalchemy_uri()}\n')
-                    else:
-                        f.write(line)
-            return self.console.handle_success(f"SQLAlchemy URI updated successfully in the Alembic configuration. Changed 'sqlalchemy.url' from 'sqlite:///alembic.sqlite' to '{self.db_manager.get_sqlalchemy_uri()}'.")
-        except Exception as e:
-            return self.console.handle_error(f"Failed to update SQLAlchemy URI: {str(e)}")
-
-    def update_alembic_env(self):
-        env_content = self.get_new_env_py_content()
-        self.write_env_py_content_to_file(env_content)
-        self.console.display_file_content(self.alembic_env_path)
-
-    def get_new_env_py_content(self):
-        return f"""
-from sqlalchemy import create_engine, text
-from alembic import context
-import os
-import sys
-import importlib.util
-
-sys.path.append(".")
-
-# Load all models dynamically
-def load_models():
-    models_path = os.path.join('sqlalchemy_models')
-    for filename in os.listdir(models_path):
-        if filename.endswith('.py') and filename != '__init__.py':
-            module_name = filename[:-3]
-            module_spec = importlib.util.spec_from_file_location(module_name, os.path.join(models_path, filename))
-            module = importlib.util.module_from_spec(module_spec)
-            module_spec.loader.exec_module(module)
-
-load_models()
-
-# Import the Base class after loading the models
-from sqlalchemy_models.base import Base
-
-# Reflect the metadata
-metadata = Base.metadata
-for cls in Base.__subclasses__():
-    cls.__table__.metadata = metadata
-
-url = '{self.db_manager.get_sqlalchemy_uri()}'
-config = context.config
-config.set_main_option('sqlalchemy.url', url)
-
-from sqlalchemy_models.base import Base  # Replace 'myapp.models' with the actual path to your models
-target_metadata = Base.metadata
-
-def create_schemas(connection):
-    connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS project_management'))
-    connection.commit()  # Ensure the schema creation is committed
-    print('Created schema: project_management')
-
-
-def run_migrations_offline():
-    context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
-    with context.begin_transaction():
-        context.run_migrations()
-
-def run_migrations_online():
-    connectable = create_engine(url)
-    with connectable.connect() as connection:
-        create_schemas(connection)  # Create necessary schemas before running migrations
-        context.configure(connection=connection, target_metadata=target_metadata)
-        with context.begin_transaction():
-            context.run_migrations()
-
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    run_migrations_online()
-"""
-
-
-    def write_env_py_content_to_file(self, content):
-        with open(self.alembic_env_path, 'w') as env_file:
-            env_file.write(content)
-        self.console.handle_info("Alembic env.py file updated successfully with target metadata and sys.path.append() for SQLAlchemy models.")

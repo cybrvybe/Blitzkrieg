@@ -1,0 +1,50 @@
+version: '3.8'
+
+networks:
+  {{ cookiecutter.workspace_name }}-network:
+    external: true
+
+services:
+  {{ cookiecutter.workspace_name }}-pgadmin:
+    container_name: {{ cookiecutter.workspace_name }}-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: alexfigueroa.cybr@gmail.com
+      PGADMIN_DEFAULT_PASSWORD: pw
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: 'True'
+      PGADMIN_CONFIG_CONSOLE_LOG_LEVEL: 10
+    image: dpage/pgadmin4:latest
+    networks:
+      - {{ cookiecutter.workspace_name }}-network
+    ports:
+      - {{ cookiecutter.pgadmin_port }}:{{ cookiecutter.pgadmin_port_forward }}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - /home/cybrdelic/alexf/software-projects/dev_tools/Blitzkrieg/{{ cookiecutter.workspace_name }}/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      {{ cookiecutter.workspace_name }}-postgres:
+        condition: service_healthy
+
+  {{ cookiecutter.workspace_name }}-postgres:
+    container_name: {{ cookiecutter.workspace_name }}-postgres
+    environment:
+      POSTGRES_DB: {{ cookiecutter.workspace_name }}
+      POSTGRES_PASSWORD: pw
+      POSTGRES_USER: {{ cookiecutter.workspace_name }}-db-user
+    healthcheck:
+      interval: 10s
+      retries: 5
+      test:
+        - CMD-SHELL
+        - pg_isready -U {{ cookiecutter.workspace_name }}-db-user -d {{ cookiecutter.workspace_name }}
+      timeout: 5s
+    image: postgres:latest
+    networks:
+      - {{ cookiecutter.workspace_name }}-network
+    ports:
+      - {{ cookiecutter.postgres_port }}:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  pgadmin_data:
+  postgres_data:
